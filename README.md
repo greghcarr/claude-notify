@@ -74,14 +74,15 @@ claude-notify --daemon
 
 ## Claude Code Integration
 
+### Basic (hardcoded app)
+
 Add to your Claude Code hooks (`~/.claude/settings.json`):
 
 ```json
 {
   "hooks": {
-    "stop": [
+    "Notification": [
       {
-        "matcher": "",
         "hooks": [
           {
             "type": "command",
@@ -93,6 +94,56 @@ Add to your Claude Code hooks (`~/.claude/settings.json`):
   }
 }
 ```
+
+### Auto-detect terminal (recommended)
+
+Create `~/.claude/hooks/notify.sh`:
+
+```bash
+#!/bin/bash
+
+# Detect which app to activate based on terminal
+if [[ -n "${CURSOR_TRACE_ID:-}" ]]; then
+  BUNDLE_ID="com.todesktop.230313mzl4w4u92"  # Cursor
+elif [[ "${TERM_PROGRAM:-}" == "ghostty" ]]; then
+  BUNDLE_ID="com.mitchellh.ghostty"
+elif [[ "${TERM_PROGRAM:-}" == "vscode" ]]; then
+  BUNDLE_ID="com.microsoft.VSCode"
+elif [[ "${TERM_PROGRAM:-}" == "Apple_Terminal" ]]; then
+  BUNDLE_ID="com.apple.Terminal"
+elif [[ "${TERM_PROGRAM:-}" == "iTerm.app" ]]; then
+  BUNDLE_ID="com.googlecode.iterm2"
+else
+  BUNDLE_ID="${__CFBundleIdentifier:-}"
+fi
+
+claude-notify -m "Claude finished" -a "$BUNDLE_ID" &
+```
+
+Make it executable and reference in settings:
+
+```bash
+chmod +x ~/.claude/hooks/notify.sh
+```
+
+```json
+{
+  "hooks": {
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/notify.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+This auto-detects which terminal you're using and activates the correct app when clicking the notification.
 
 ## How it works
 
