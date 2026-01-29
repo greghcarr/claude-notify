@@ -10,7 +10,8 @@ A lightweight macOS menu bar app for sending native notifications from the comma
 - Native macOS notifications with sound
 - Menu bar icon with notification history
 - Click notification to activate any app (by bundle ID)
-- Auto-starts daemon on first notification
+- Single instance (lock file prevents duplicates)
+- Auto-start at login via LaunchAgent
 - Zero dependencies, single binary
 
 ## Installation
@@ -18,13 +19,29 @@ A lightweight macOS menu bar app for sending native notifications from the comma
 ### Build from source
 
 ```bash
-swift build -c release
-cp .build/arm64-apple-macosx/release/claude-notify /usr/local/bin/
+./build.sh
+cp -r .build/release/ClaudeNotify.app /Applications/
+codesign --force --deep --sign - /Applications/ClaudeNotify.app
+```
+
+### Add CLI alias
+
+Add to `~/.zshrc`:
+
+```bash
+alias claude-notify='/Applications/ClaudeNotify.app/Contents/MacOS/ClaudeNotify'
+```
+
+### Auto-start at login (optional)
+
+```bash
+cp com.claude.notify.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.claude.notify.plist
 ```
 
 ### Grant permissions
 
-On first run, macOS will prompt for notification permissions. Allow them in **System Settings → Notifications → claude-notify**.
+On first notification, macOS will prompt for notification permissions. Allow them in **System Settings → Notifications → ClaudeNotify**.
 
 ## Usage
 
@@ -68,7 +85,7 @@ Add to your Claude Code hooks (`~/.claude/settings.json`):
         "hooks": [
           {
             "type": "command",
-            "command": "claude-notify -m 'Claude finished' -a com.apple.Terminal"
+            "command": "claude-notify -m 'Claude finished' -a com.todesktop.230313mzl4w4u92"
           }
         ]
       }
@@ -80,8 +97,23 @@ Add to your Claude Code hooks (`~/.claude/settings.json`):
 ## How it works
 
 1. First invocation starts a background daemon (menu bar app)
-2. Subsequent calls send messages to the daemon via `DistributedNotificationCenter`
-3. Daemon displays native notifications and tracks history in menu bar
+2. Lock file (`/tmp/claude-notify.lock`) ensures single instance
+3. Subsequent calls send messages to the daemon via `DistributedNotificationCenter`
+4. Daemon displays native notifications and tracks history in menu bar
+5. Sound played via `afplay` for reliability
+
+## LaunchAgent commands
+
+```bash
+# Stop daemon
+launchctl unload ~/Library/LaunchAgents/com.claude.notify.plist
+
+# Start daemon
+launchctl load ~/Library/LaunchAgents/com.claude.notify.plist
+
+# Check status
+launchctl list | grep claude
+```
 
 ## Common Bundle IDs
 

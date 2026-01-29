@@ -1,16 +1,56 @@
 import Cocoa
 import UserNotifications
 
-let CATEGORY_ID = "CLAUDE_ACTION"
-let ACTION_ID = "OPEN_APP"
 let NOTIF_NAME = Notification.Name("com.claude.notify.send")
-let APP_ID = "com.claude.notify"
+let BUNDLE_ID = "com.claude.notify"
+let LOCK_FILE = "/tmp/claude-notify.lock"
+
+// Single instance lock using file lock
+class SingleInstance {
+    private var fileDescriptor: Int32 = -1
+
+    func tryLock() -> Bool {
+        fileDescriptor = open(LOCK_FILE, O_CREAT | O_RDWR, 0o644)
+        if fileDescriptor == -1 { return false }
+
+        var lock = flock()
+        lock.l_start = 0
+        lock.l_len = 0
+        lock.l_type = Int16(F_WRLCK)
+        lock.l_whence = Int16(SEEK_SET)
+
+        if fcntl(fileDescriptor, F_SETLK, &lock) == -1 {
+            close(fileDescriptor)
+            fileDescriptor = -1
+            return false
+        }
+
+        // Write PID to file
+        ftruncate(fileDescriptor, 0)
+        let pid = "\(getpid())"
+        write(fileDescriptor, pid, pid.count)
+
+        return true
+    }
+
+    deinit {
+        if fileDescriptor != -1 {
+            close(fileDescriptor)
+            unlink(LOCK_FILE)
+        }
+    }
+}
+
+let singleInstance = SingleInstance()
 
 class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     var statusItem: NSStatusItem!
-    var pendingNotifications: [(id: String, message: String, bundleId: String?)] = []
+    var history: [(id: String, message: String, title: String, bundleId: String?)] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Prevent macOS from auto-terminating the app
+        ProcessInfo.processInfo.disableAutomaticTermination("Menu bar daemon")
+
         setupMenuBar()
         setupNotificationCenter()
         listenForCommands()
@@ -19,7 +59,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     func setupMenuBar() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
-        if let button = statusItem.button {
+        if statusItem.button != nil {
             updateIcon(hasPending: false)
         }
 
@@ -37,15 +77,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     func updateMenu() {
         let menu = NSMenu()
 
-        if pendingNotifications.isEmpty {
-            let item = NSMenuItem(title: "Aucune notification", action: nil, keyEquivalent: "")
+        if history.isEmpty {
+            let item = NSMenuItem(title: "No notifications", action: nil, keyEquivalent: "")
             item.isEnabled = false
             menu.addItem(item)
         } else {
-            menu.addItem(NSMenuItem(title: "\(pendingNotifications.count) notification(s)", action: nil, keyEquivalent: ""))
+            menu.addItem(NSMenuItem(title: "\(history.count) notification(s)", action: nil, keyEquivalent: ""))
             menu.addItem(NSMenuItem.separator())
 
-            for notif in pendingNotifications.prefix(5) {
+            for notif in history.prefix(5) {
                 let truncated = String(notif.message.prefix(40)) + (notif.message.count > 40 ? "..." : "")
                 let item = NSMenuItem(title: truncated, action: #selector(openFromMenu(_:)), keyEquivalent: "")
                 item.representedObject = notif
@@ -54,33 +94,33 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             }
 
             menu.addItem(NSMenuItem.separator())
-            menu.addItem(NSMenuItem(title: "Tout effacer", action: #selector(clearAll), keyEquivalent: "c"))
+            menu.addItem(NSMenuItem(title: "Clear all", action: #selector(clearAll), keyEquivalent: "c"))
         }
 
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quitter", action: #selector(quit), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"))
 
         statusItem.menu = menu
     }
 
     func updateBadge() {
-        updateIcon(hasPending: !pendingNotifications.isEmpty)
+        updateIcon(hasPending: !history.isEmpty)
         updateMenu()
     }
 
     @objc func openFromMenu(_ sender: NSMenuItem) {
-        guard let notif = sender.representedObject as? (id: String, message: String, bundleId: String?) else { return }
+        guard let notif = sender.representedObject as? (id: String, message: String, title: String, bundleId: String?) else { return }
 
         if let bundleId = notif.bundleId, !bundleId.isEmpty {
             openApp(bundleId: bundleId)
         }
 
-        pendingNotifications.removeAll { $0.id == notif.id }
+        history.removeAll { $0.id == notif.id }
         updateBadge()
     }
 
     @objc func clearAll() {
-        pendingNotifications.removeAll()
+        history.removeAll()
         updateBadge()
     }
 
@@ -113,21 +153,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         let center = UNUserNotificationCenter.current()
         center.delegate = self
 
-        let action = UNNotificationAction(
-            identifier: ACTION_ID,
-            title: "Ouvrir",
-            options: [.foreground]
-        )
-        let category = UNNotificationCategory(
-            identifier: CATEGORY_ID,
-            actions: [action],
-            intentIdentifiers: [],
-            options: [.customDismissAction]
-        )
-        center.setNotificationCategories([category])
-
-        // Request auth on startup
-        center.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+        center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+            if let error = error {
+                print("Notification auth error: \(error)")
+            }
+        }
     }
 
     func sendNotification(args: NotificationArgs) {
@@ -135,23 +165,26 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         content.title = args.title
         content.body = args.message
         content.sound = args.sound ? .default : nil
-        content.categoryIdentifier = CATEGORY_ID
         content.userInfo = ["bundleId": args.activate ?? ""]
 
         let id = UUID().uuidString
-        let request = UNNotificationRequest(
-            identifier: id,
-            content: content,
-            trigger: nil
-        )
+        let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
 
-        pendingNotifications.append((id: id, message: args.message, bundleId: args.activate))
+        history.insert((id: id, message: args.message, title: args.title, bundleId: args.activate), at: 0)
         DispatchQueue.main.async { self.updateBadge() }
 
         UNUserNotificationCenter.current().add(request) { error in
             if let error = error {
-                print("Error: \(error.localizedDescription)")
+                print("Notification error: \(error)")
             }
+        }
+
+        // Play sound directly (UNNotificationSound.default doesn't always work)
+        if args.sound {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/afplay")
+            task.arguments = ["/System/Library/Sounds/Glass.aiff"]
+            try? task.run()
         }
     }
 
@@ -168,18 +201,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         completionHandler([.banner, .sound])
     }
 
-    // Handle notification response
+    // Handle notification click
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
         let notifId = response.notification.request.identifier
+        let userInfo = response.notification.request.content.userInfo
 
-        if let index = pendingNotifications.firstIndex(where: { $0.id == notifId }) {
-            let notif = pendingNotifications.remove(at: index)
+        if let index = history.firstIndex(where: { $0.id == notifId }) {
+            let notif = history.remove(at: index)
             if let bundleId = notif.bundleId, !bundleId.isEmpty {
                 openApp(bundleId: bundleId)
             }
             DispatchQueue.main.async { self.updateBadge() }
+        } else if let bundleId = userInfo["bundleId"] as? String, !bundleId.isEmpty {
+            openApp(bundleId: bundleId)
         }
 
         completionHandler()
@@ -193,16 +229,7 @@ struct NotificationArgs {
     var activate: String?
 }
 
-// Check if daemon is already running
-func isDaemonRunning() -> Bool {
-    let runningApps = NSWorkspace.shared.runningApplications
-    let myPid = ProcessInfo.processInfo.processIdentifier
-    return runningApps.contains { app in
-        app.bundleIdentifier == APP_ID && app.processIdentifier != myPid
-    }
-}
-
-// Send command to running daemon
+// Send command to running daemon via DistributedNotificationCenter
 func sendToDaemon(args: NotificationArgs) {
     var userInfo: [String: Any] = [
         "message": args.message,
@@ -263,31 +290,32 @@ while let arg = args.first {
     }
 }
 
-if daemonMode {
+if daemonMode || !notifArgs.message.isEmpty {
+    // Try to acquire lock (single instance)
+    let canStartDaemon = singleInstance.tryLock()
+
+    if !canStartDaemon {
+        // Another daemon is running
+        if !notifArgs.message.isEmpty {
+            sendToDaemon(args: notifArgs)
+        }
+        exit(0)
+    }
+
     // Start as menu bar app
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
     let delegate = AppDelegate()
     app.delegate = delegate
-    app.run()
-} else if !notifArgs.message.isEmpty {
-    // Send to daemon if running, otherwise start daemon and send
-    if isDaemonRunning() {
-        sendToDaemon(args: notifArgs)
-        exit(0)
-    } else {
-        // Start daemon and send notification
-        let app = NSApplication.shared
-        app.setActivationPolicy(.accessory)
-        let delegate = AppDelegate()
-        app.delegate = delegate
 
+    if !daemonMode && !notifArgs.message.isEmpty {
         // Send notification after app starts
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             delegate.sendNotification(args: notifArgs)
         }
-        app.run()
     }
+
+    app.run()
 } else {
     print("Error: use --daemon or provide -m <message>")
     exit(1)
