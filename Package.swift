@@ -8,6 +8,11 @@ let package = Package(
         .executableTarget(
             name: "claude-notify",
             path: "Sources"
+        ),
+        .testTarget(
+            name: "claude-notifyTests",
+            dependencies: ["claude-notify"],
+            path: "Tests/claude-notifyTests"
         )
     ]
 )
