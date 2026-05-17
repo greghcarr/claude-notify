@@ -9,7 +9,7 @@ A lightweight macOS menu bar app for sending native notifications from the comma
 
 - Native macOS notifications with sound
 - Menu bar icon with notification history
-- Click notification to activate any app (by bundle ID)
+- Click notification to activate any app (by bundle ID) or open a URL (`vscode://`, `cursor://`, `https://`, etc.)
 - Single instance (lock file prevents duplicates)
 - Auto-start at login via LaunchAgent
 - Zero dependencies, single binary
@@ -55,6 +55,12 @@ claude-notify -m "Done" -t "My Task"
 # Open an app when clicked
 claude-notify -m "Ready" -a com.apple.Terminal
 
+# Open the specific VS Code workspace when clicked (overrides -a)
+claude-notify -m "Build complete" -u "vscode://file//Users/me/projects/myrepo"
+
+# Open a web link when clicked
+claude-notify -m "PR ready" -u "https://github.com/me/repo/pull/42"
+
 # Silent notification
 claude-notify -m "Background task done" --no-sound
 
@@ -69,8 +75,10 @@ claude-notify --daemon
 | `-m, --message <text>` | Notification message (required) |
 | `-t, --title <text>` | Notification title (default: "Claude Code") |
 | `-a, --activate <bundle-id>` | App to activate on click |
+| `-u, --url <url>` | URL to open on click (overrides `-a`; supports `vscode://`, `cursor://`, `https://`, etc.) |
 | `--no-sound` | Disable notification sound |
 | `-d, --daemon` | Run as menu bar daemon |
+| `--version` | Print version and exit |
 
 ## Claude Code Integration
 
@@ -97,34 +105,21 @@ Add to your Claude Code hooks (`~/.claude/settings.json`):
 
 ### Auto-detect terminal (recommended)
 
-Create `~/.claude/hooks/notify.sh`:
+A ready-made hook script lives at [examples/claude-code-notify.sh](examples/claude-code-notify.sh). It detects which terminal Claude Code is running inside and picks the best click target:
+
+- **VS Code or Cursor**: opens the *specific workspace window* via `vscode://file/<workspace>` or `cursor://file/<workspace>`, not just whichever IDE window happened to be frontmost.
+- **Ghostty, Terminal, iTerm2**: activates the app by bundle ID.
+- **Anything else**: falls back to the `__CFBundleIdentifier` environment variable, then to no click target if that is also missing.
+
+Install:
 
 ```bash
-#!/bin/bash
-
-# Detect which app to activate based on terminal
-if [[ -n "${CURSOR_TRACE_ID:-}" ]]; then
-  BUNDLE_ID="com.todesktop.230313mzl4w4u92"  # Cursor
-elif [[ "${TERM_PROGRAM:-}" == "ghostty" ]]; then
-  BUNDLE_ID="com.mitchellh.ghostty"
-elif [[ "${TERM_PROGRAM:-}" == "vscode" ]]; then
-  BUNDLE_ID="com.microsoft.VSCode"
-elif [[ "${TERM_PROGRAM:-}" == "Apple_Terminal" ]]; then
-  BUNDLE_ID="com.apple.Terminal"
-elif [[ "${TERM_PROGRAM:-}" == "iTerm.app" ]]; then
-  BUNDLE_ID="com.googlecode.iterm2"
-else
-  BUNDLE_ID="${__CFBundleIdentifier:-}"
-fi
-
-claude-notify -m "Claude finished" -a "$BUNDLE_ID" &
-```
-
-Make it executable and reference in settings:
-
-```bash
+mkdir -p ~/.claude/hooks
+cp examples/claude-code-notify.sh ~/.claude/hooks/notify.sh
 chmod +x ~/.claude/hooks/notify.sh
 ```
+
+Wire into Claude Code (`~/.claude/settings.json`):
 
 ```json
 {
@@ -142,8 +137,6 @@ chmod +x ~/.claude/hooks/notify.sh
   }
 }
 ```
-
-This auto-detects which terminal you're using and activates the correct app when clicking the notification.
 
 ## How it works
 
