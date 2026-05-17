@@ -154,6 +154,8 @@ Wire into Claude Code (`~/.claude/settings.json`):
 }
 ```
 
+**Verified terminals:** the VS Code Claude Code extension (the maintainer's daily driver). The Cursor / Ghostty / Apple Terminal / iTerm2 / `__CFBundleIdentifier` branches are constructed by analogy but not personally tested. Issues and PRs welcome if a branch isn't routing correctly in your setup.
+
 ## How it works
 
 1. First invocation starts a background daemon (menu bar app)

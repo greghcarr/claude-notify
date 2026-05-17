@@ -30,6 +30,10 @@
 #   }
 #
 # Adjust CLI_PATH below if claude-notify is installed elsewhere.
+#
+# Verified in the VS Code Claude Code extension. The Cursor / Ghostty / Apple
+# Terminal / iTerm2 / __CFBundleIdentifier branches are constructed by analogy
+# but not personally tested. Issues and PRs welcome if a branch is wrong.
 
 set -u
 
