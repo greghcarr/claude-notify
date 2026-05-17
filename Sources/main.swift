@@ -5,6 +5,12 @@ enum Constants {
     enum IPC {
         static let notificationName = Notification.Name("com.claude.notify.send")
         static let lockFilePath = "/tmp/claude-notify.lock"
+        static let payloadKey = "payload"
+    }
+
+    enum UNUserInfo {
+        static let bundleIdKey = "bundleId"
+        static let urlKey = "url"
     }
 
     enum Defaults {
@@ -44,6 +50,14 @@ enum Constants {
     enum Auth {
         static let requestedOptions: UNAuthorizationOptions = [.alert, .sound, .badge]
     }
+}
+
+struct IPCMessage: Codable {
+    let title: String
+    let message: String
+    let sound: Bool
+    let activate: String?
+    let url: String?
 }
 
 // Single instance lock using file lock
@@ -89,6 +103,7 @@ struct StoredNotification {
     let title: String
     let message: String
     let bundleId: String?
+    let url: String?
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
@@ -159,9 +174,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     @objc func openFromMenu(_ sender: NSMenuItem) {
         guard let notif = sender.representedObject as? StoredNotification else { return }
 
-        if let bundleId = notif.bundleId, !bundleId.isEmpty {
-            openApp(bundleId: bundleId)
-        }
+        activate(url: notif.url, bundleId: notif.bundleId)
 
         history.removeAll { $0.id == notif.id }
         updateBadge()
@@ -186,14 +199,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     }
 
     @objc func handleCommand(_ notification: Notification) {
-        guard let userInfo = notification.userInfo,
-              let message = userInfo["message"] as? String else { return }
+        guard let payload = notification.userInfo?[Constants.IPC.payloadKey] as? Data,
+              let ipc = try? JSONDecoder().decode(IPCMessage.self, from: payload) else { return }
 
-        let title = userInfo["title"] as? String ?? Constants.Defaults.title
-        let bundleId = userInfo["activate"] as? String
-        let sound = userInfo["sound"] as? Bool ?? true
-
-        let args = NotificationArgs(title: title, message: message, sound: sound, activate: bundleId)
+        let args = NotificationArgs(
+            title: ipc.title,
+            message: ipc.message,
+            sound: ipc.sound,
+            activate: ipc.activate,
+            url: ipc.url
+        )
         sendNotification(args: args)
     }
 
@@ -213,12 +228,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         content.title = args.title
         content.body = args.message
         content.sound = args.sound ? .default : nil
-        content.userInfo = ["bundleId": args.activate ?? ""]
+        content.userInfo = [
+            Constants.UNUserInfo.bundleIdKey: args.activate ?? "",
+            Constants.UNUserInfo.urlKey: args.url ?? ""
+        ]
 
         let id = UUID().uuidString
         let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
 
-        history.insert(StoredNotification(id: id, title: args.title, message: args.message, bundleId: args.activate), at: 0)
+        history.insert(
+            StoredNotification(
+                id: id,
+                title: args.title,
+                message: args.message,
+                bundleId: args.activate,
+                url: args.url
+            ),
+            at: 0
+        )
         DispatchQueue.main.async { self.updateBadge() }
 
         UNUserNotificationCenter.current().add(request) { error in
@@ -234,6 +261,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             task.arguments = [Constants.Sound.defaultFile]
             try? task.run()
         }
+    }
+
+    func activate(url: String?, bundleId: String?) {
+        if let url = url, !url.isEmpty {
+            openURL(url)
+        } else if let bundleId = bundleId, !bundleId.isEmpty {
+            openApp(bundleId: bundleId)
+        }
+    }
+
+    func openURL(_ urlString: String) {
+        guard let url = URL(string: urlString) else { return }
+        NSWorkspace.shared.open(url)
     }
 
     func openApp(bundleId: String) {
@@ -258,12 +298,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
 
         if let index = history.firstIndex(where: { $0.id == notifId }) {
             let notif = history.remove(at: index)
-            if let bundleId = notif.bundleId, !bundleId.isEmpty {
-                openApp(bundleId: bundleId)
-            }
+            activate(url: notif.url, bundleId: notif.bundleId)
             DispatchQueue.main.async { self.updateBadge() }
-        } else if let bundleId = userInfo["bundleId"] as? String, !bundleId.isEmpty {
-            openApp(bundleId: bundleId)
+        } else {
+            let url = userInfo[Constants.UNUserInfo.urlKey] as? String
+            let bundleId = userInfo[Constants.UNUserInfo.bundleIdKey] as? String
+            activate(url: url, bundleId: bundleId)
         }
 
         completionHandler()
@@ -275,23 +315,24 @@ struct NotificationArgs {
     var message = ""
     var sound = true
     var activate: String?
+    var url: String?
 }
 
 // Send command to running daemon via DistributedNotificationCenter
 func sendToDaemon(args: NotificationArgs) {
-    var userInfo: [String: Any] = [
-        "message": args.message,
-        "title": args.title,
-        "sound": args.sound
-    ]
-    if let activate = args.activate {
-        userInfo["activate"] = activate
-    }
+    let ipc = IPCMessage(
+        title: args.title,
+        message: args.message,
+        sound: args.sound,
+        activate: args.activate,
+        url: args.url
+    )
+    guard let payload = try? JSONEncoder().encode(ipc) else { return }
 
     DistributedNotificationCenter.default().postNotificationName(
         Constants.IPC.notificationName,
         object: nil,
-        userInfo: userInfo,
+        userInfo: [Constants.IPC.payloadKey: payload],
         deliverImmediately: true
     )
 }
@@ -325,6 +366,9 @@ while let arg = args.first {
     case "-a", "--activate":
         notifArgs.activate = args.first
         args = args.dropFirst()
+    case "-u", "--url":
+        notifArgs.url = args.first
+        args = args.dropFirst()
     case "--version":
         print("claude-notify \(AppVersion.current)")
         exit(0)
@@ -339,6 +383,7 @@ while let arg = args.first {
           -t, --title <text>   Notification title (default: "\(Constants.Defaults.title)")
           -m, --message <text> Notification message
           -a, --activate <id>  Bundle ID to activate on click
+          -u, --url <url>      URL to open on click (overrides -a)
           --no-sound           Disable sound
           --version            Print version and exit
         """)
