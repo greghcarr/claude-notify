@@ -1,16 +1,57 @@
 import Cocoa
 import UserNotifications
 
-let NOTIF_NAME = Notification.Name("com.claude.notify.send")
-let BUNDLE_ID = "com.claude.notify"
-let LOCK_FILE = "/tmp/claude-notify.lock"
+enum Constants {
+    enum IPC {
+        static let notificationName = Notification.Name("com.claude.notify.send")
+        static let lockFilePath = "/tmp/claude-notify.lock"
+    }
+
+    enum Defaults {
+        static let title = "Claude Code"
+    }
+
+    enum Icons {
+        static let pending = "bubble.left.fill"
+        static let idle = "bubble.left"
+        static let accessibilityDescription = "Claude Notify"
+    }
+
+    enum Menu {
+        static let maxVisibleHistory = 5
+        static let messagePreviewLength = 40
+        static let ellipsis = "..."
+        static let emptyLabel = "No notifications"
+        static let clearAllTitle = "Clear all"
+        static let quitTitle = "Quit"
+        static let countSuffix = "notification(s)"
+    }
+
+    enum Shortcuts {
+        static let clearAll = "c"
+        static let quit = "q"
+    }
+
+    enum Sound {
+        static let binaryPath = "/usr/bin/afplay"
+        static let defaultFile = "/System/Library/Sounds/Glass.aiff"
+    }
+
+    enum Startup {
+        static let firstNotificationDelay: TimeInterval = 0.5
+    }
+
+    enum Auth {
+        static let requestedOptions: UNAuthorizationOptions = [.alert, .sound, .badge]
+    }
+}
 
 // Single instance lock using file lock
 class SingleInstance {
     private var fileDescriptor: Int32 = -1
 
     func tryLock() -> Bool {
-        fileDescriptor = open(LOCK_FILE, O_CREAT | O_RDWR, 0o644)
+        fileDescriptor = open(Constants.IPC.lockFilePath, O_CREAT | O_RDWR, 0o644)
         if fileDescriptor == -1 { return false }
 
         var lock = flock()
@@ -36,7 +77,7 @@ class SingleInstance {
     deinit {
         if fileDescriptor != -1 {
             close(fileDescriptor)
-            unlink(LOCK_FILE)
+            unlink(Constants.IPC.lockFilePath)
         }
     }
 }
@@ -68,8 +109,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
 
     func updateIcon(hasPending: Bool) {
         if let button = statusItem.button {
-            let symbolName = hasPending ? "bubble.left.fill" : "bubble.left"
-            button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Claude Notify")
+            let symbolName = hasPending ? Constants.Icons.pending : Constants.Icons.idle
+            button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: Constants.Icons.accessibilityDescription)
             button.image?.isTemplate = true
         }
     }
@@ -78,15 +119,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         let menu = NSMenu()
 
         if history.isEmpty {
-            let item = NSMenuItem(title: "No notifications", action: nil, keyEquivalent: "")
+            let item = NSMenuItem(title: Constants.Menu.emptyLabel, action: nil, keyEquivalent: "")
             item.isEnabled = false
             menu.addItem(item)
         } else {
-            menu.addItem(NSMenuItem(title: "\(history.count) notification(s)", action: nil, keyEquivalent: ""))
+            menu.addItem(NSMenuItem(title: "\(history.count) \(Constants.Menu.countSuffix)", action: nil, keyEquivalent: ""))
             menu.addItem(NSMenuItem.separator())
 
-            for notif in history.prefix(5) {
-                let truncated = String(notif.message.prefix(40)) + (notif.message.count > 40 ? "..." : "")
+            for notif in history.prefix(Constants.Menu.maxVisibleHistory) {
+                let truncated = String(notif.message.prefix(Constants.Menu.messagePreviewLength)) + (notif.message.count > Constants.Menu.messagePreviewLength ? Constants.Menu.ellipsis : "")
                 let item = NSMenuItem(title: truncated, action: #selector(openFromMenu(_:)), keyEquivalent: "")
                 item.representedObject = notif
                 item.target = self
@@ -94,11 +135,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             }
 
             menu.addItem(NSMenuItem.separator())
-            menu.addItem(NSMenuItem(title: "Clear all", action: #selector(clearAll), keyEquivalent: "c"))
+            menu.addItem(NSMenuItem(title: Constants.Menu.clearAllTitle, action: #selector(clearAll), keyEquivalent: Constants.Shortcuts.clearAll))
         }
 
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: Constants.Menu.quitTitle, action: #selector(quit), keyEquivalent: Constants.Shortcuts.quit))
 
         statusItem.menu = menu
     }
@@ -132,7 +173,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         DistributedNotificationCenter.default().addObserver(
             self,
             selector: #selector(handleCommand(_:)),
-            name: NOTIF_NAME,
+            name: Constants.IPC.notificationName,
             object: nil
         )
     }
@@ -141,7 +182,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         guard let userInfo = notification.userInfo,
               let message = userInfo["message"] as? String else { return }
 
-        let title = userInfo["title"] as? String ?? "Claude Code"
+        let title = userInfo["title"] as? String ?? Constants.Defaults.title
         let bundleId = userInfo["activate"] as? String
         let sound = userInfo["sound"] as? Bool ?? true
 
@@ -153,7 +194,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         let center = UNUserNotificationCenter.current()
         center.delegate = self
 
-        center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+        center.requestAuthorization(options: Constants.Auth.requestedOptions) { granted, error in
             if let error = error {
                 print("Notification auth error: \(error)")
             }
@@ -182,8 +223,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         // Play sound directly (UNNotificationSound.default doesn't always work)
         if args.sound {
             let task = Process()
-            task.executableURL = URL(fileURLWithPath: "/usr/bin/afplay")
-            task.arguments = ["/System/Library/Sounds/Glass.aiff"]
+            task.executableURL = URL(fileURLWithPath: Constants.Sound.binaryPath)
+            task.arguments = [Constants.Sound.defaultFile]
             try? task.run()
         }
     }
@@ -223,7 +264,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
 }
 
 struct NotificationArgs {
-    var title = "Claude Code"
+    var title = Constants.Defaults.title
     var message = ""
     var sound = true
     var activate: String?
@@ -241,7 +282,7 @@ func sendToDaemon(args: NotificationArgs) {
     }
 
     DistributedNotificationCenter.default().postNotificationName(
-        NOTIF_NAME,
+        Constants.IPC.notificationName,
         object: nil,
         userInfo: userInfo,
         deliverImmediately: true
@@ -277,7 +318,7 @@ while let arg = args.first {
 
         Options:
           -d, --daemon         Run as menu bar daemon
-          -t, --title <text>   Notification title (default: "Claude Code")
+          -t, --title <text>   Notification title (default: "\(Constants.Defaults.title)")
           -m, --message <text> Notification message
           -a, --activate <id>  Bundle ID to activate on click
           --no-sound           Disable sound
@@ -310,7 +351,7 @@ if daemonMode || !notifArgs.message.isEmpty {
 
     if !daemonMode && !notifArgs.message.isEmpty {
         // Send notification after app starts
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + Constants.Startup.firstNotificationDelay) {
             delegate.sendNotification(args: notifArgs)
         }
     }
