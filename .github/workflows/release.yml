@@ -5,6 +5,11 @@
 # and updates the Cask version + sha256 in both this repo (on dev) and
 # greghcarr/homebrew-tap (on main).
 #
+# Can also be dispatched manually against an existing tag, useful for
+# re-running after a transient failure or after adding the TAP_PAT secret:
+#
+#   gh workflow run release.yml -R greghcarr/claude-notify -f tag=v1.1.4
+#
 # Required for the tap-update step:
 #   Repository secret TAP_PAT, a fine-grained personal access token scoped
 #   to greghcarr/homebrew-tap with "Contents: Read and write" permission.
@@ -17,6 +22,12 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to re-run the release against (e.g. v1.1.4)'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -25,20 +36,28 @@ jobs:
   release:
     runs-on: macos-latest
     steps:
-      - name: Checkout source
+      - name: Resolve tag and version
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          echo "name=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "v=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout source at tag
         uses: actions/checkout@v4
         with:
+          ref: ${{ steps.tag.outputs.name }}
           fetch-depth: 0
-
-      - name: Extract version from tag
-        id: version
-        run: echo "v=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Build .app and zip
         run: |
           ./build.sh
           cd .build/release
-          ZIP="ClaudeNotify-${{ steps.version.outputs.v }}.zip"
+          ZIP="ClaudeNotify-${{ steps.tag.outputs.v }}.zip"
           zip -qry "$ZIP" ClaudeNotify.app
           echo "ZIP_PATH=$(pwd)/$ZIP" >> "$GITHUB_ENV"
           echo "SHA=$(shasum -a 256 $ZIP | cut -d ' ' -f 1)" >> "$GITHUB_ENV"
@@ -46,7 +65,7 @@ jobs:
       - name: Extract release notes from CHANGELOG
         id: notes
         run: |
-          VER="${{ steps.version.outputs.v }}"
+          VER="${{ steps.tag.outputs.v }}"
           NOTES=$(awk -v ver="$VER" '
             $0 == "## " ver { found=1; next }
             found && /^## [0-9]/ { exit }
@@ -61,12 +80,13 @@ jobs:
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ steps.tag.outputs.name }}
         run: |
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "$ZIP_PATH" --clobber
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" "$ZIP_PATH" --clobber
           else
-            gh release create "$GITHUB_REF_NAME" \
-              --title "$GITHUB_REF_NAME" \
+            gh release create "$TAG_NAME" \
+              --title "$TAG_NAME" \
               --notes "${{ steps.notes.outputs.body }}" \
               "$ZIP_PATH"
           fi
@@ -74,22 +94,24 @@ jobs:
       - name: Update Cask in source repo (on dev)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ steps.tag.outputs.name }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin dev
           git checkout dev
-          sed -i '' "s|^  version \".*\"|  version \"${{ steps.version.outputs.v }}\"|" Casks/claude-notify.rb
+          sed -i '' "s|^  version \".*\"|  version \"${{ steps.tag.outputs.v }}\"|" Casks/claude-notify.rb
           sed -i '' "s|^  sha256 \".*\"|  sha256 \"$SHA\"|" Casks/claude-notify.rb
           if ! git diff --quiet Casks/claude-notify.rb; then
             git add Casks/claude-notify.rb
-            git commit -m "Update Cask for $GITHUB_REF_NAME"
+            git commit -m "Update Cask for $TAG_NAME"
             git push origin dev
           fi
 
       - name: Update Cask in greghcarr/homebrew-tap
         env:
           TAP_PAT: ${{ secrets.TAP_PAT }}
+          TAG_NAME: ${{ steps.tag.outputs.name }}
         run: |
           if [ -z "${TAP_PAT}" ]; then
             echo "TAP_PAT secret not set; skipping tap update."
@@ -100,12 +122,12 @@ jobs:
           fi
           git clone "https://x-access-token:${TAP_PAT}@github.com/greghcarr/homebrew-tap.git" /tmp/tap
           cd /tmp/tap
-          sed -i '' "s|^  version \".*\"|  version \"${{ steps.version.outputs.v }}\"|" Casks/claude-notify.rb
+          sed -i '' "s|^  version \".*\"|  version \"${{ steps.tag.outputs.v }}\"|" Casks/claude-notify.rb
           sed -i '' "s|^  sha256 \".*\"|  sha256 \"$SHA\"|" Casks/claude-notify.rb
           if ! git diff --quiet Casks/claude-notify.rb; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add Casks/claude-notify.rb
-            git commit -m "Update claude-notify to $GITHUB_REF_NAME"
+            git commit -m "Update claude-notify to $TAG_NAME"
             git push origin main
           fi
