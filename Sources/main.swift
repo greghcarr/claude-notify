@@ -105,8 +105,8 @@ case .run(let notifArgs, let daemonMode):
     let delegate = AppDelegate()
     app.delegate = delegate
 
-    if !daemonMode && !notifArgs.message.isEmpty {
-        // Send notification after app starts
+    if !notifArgs.message.isEmpty {
+        // Send notification after the app finishes launching.
         DispatchQueue.main.asyncAfter(deadline: .now() + Constants.Startup.firstNotificationDelay) {
             delegate.send(args: notifArgs)
         }
