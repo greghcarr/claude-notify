@@ -2,6 +2,16 @@
 
 All notable changes to this fork.
 
+## 1.1.3
+
+### Added
+- Prebuilt `.app` bundle attached to each GitHub release. No Xcode required to install.
+- Homebrew Cask at `Casks/claude-notify.rb` distributed via a separate tap repo. Install with `brew install --cask greghcarr/tap/claude-notify`.
+- Troubleshooting section in the README covering the macOS Show Previews gotcha, the ad-hoc-signed Gatekeeper warning, notification permissions, and the LaunchAgent KeepAlive respawn behavior.
+
+### Removed
+- The old source-build `Formula/claude-notify.rb` (was never functional: a Homebrew Formula installs the bare binary to `bin/`, but the app needs the `.app` bundle wrapper for `UNUserNotificationCenter` to deliver notifications). Replaced by the Cask, which installs the prebuilt `.app` directly into `/Applications/`.
+
 ## 1.1.2
 
 ### Changed
