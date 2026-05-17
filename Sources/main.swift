@@ -1,102 +1,50 @@
 import Cocoa
 import UserNotifications
 
-class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
-    var statusItem: NSStatusItem!
-    var history: [StoredNotification] = []
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let history = NotificationHistory()
+    private let soundPlayer: SoundPlayer = AfplaySoundPlayer(
+        binaryPath: Constants.Sound.binaryPath,
+        soundFile: Constants.Sound.defaultFile
+    )
+    private var menuBar: MenuBarController!
+    private var dispatcher: NotificationDispatcher!
+    private var ipcListener: IPCListener!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Prevent macOS from auto-terminating the app
         ProcessInfo.processInfo.disableAutomaticTermination("Menu bar daemon")
 
-        setupMenuBar()
-        setupNotificationCenter()
-        listenForCommands()
-    }
-
-    func setupMenuBar() {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-
-        if statusItem.button != nil {
-            updateIcon(hasPending: false)
-        }
-
-        updateMenu()
-    }
-
-    func updateIcon(hasPending: Bool) {
-        if let button = statusItem.button {
-            let symbolName = hasPending ? Constants.Icons.pending : Constants.Icons.idle
-            button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: Constants.Icons.accessibilityDescription)
-            button.image?.isTemplate = true
-        }
-    }
-
-    func updateMenu() {
-        let menu = NSMenu()
-
-        if history.isEmpty {
-            let item = NSMenuItem(title: Constants.Menu.emptyLabel, action: nil, keyEquivalent: "")
-            item.isEnabled = false
-            menu.addItem(item)
-        } else {
-            menu.addItem(NSMenuItem(title: "\(history.count) \(Constants.Menu.countSuffix)", action: nil, keyEquivalent: ""))
-            menu.addItem(NSMenuItem.separator())
-
-            for notif in history.prefix(Constants.Menu.maxVisibleHistory) {
-                let truncated = String(notif.message.prefix(Constants.Menu.messagePreviewLength)) + (notif.message.count > Constants.Menu.messagePreviewLength ? Constants.Menu.ellipsis : "")
-                let item = NSMenuItem(title: truncated, action: #selector(openFromMenu(_:)), keyEquivalent: "")
-                item.representedObject = notif
-                item.target = self
-                menu.addItem(item)
-            }
-
-            menu.addItem(NSMenuItem.separator())
-            menu.addItem(NSMenuItem(title: Constants.Menu.clearAllTitle, action: #selector(clearAll), keyEquivalent: Constants.Shortcuts.clearAll))
-        }
-
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: Constants.Menu.quitTitle, action: #selector(quit), keyEquivalent: Constants.Shortcuts.quit))
-
-        statusItem.menu = menu
-    }
-
-    func updateBadge() {
-        updateIcon(hasPending: !history.isEmpty)
-        updateMenu()
-    }
-
-    @objc func openFromMenu(_ sender: NSMenuItem) {
-        guard let notif = sender.representedObject as? StoredNotification else { return }
-
-        activate(url: notif.url, bundleId: notif.bundleId)
-
-        history.removeAll { $0.id == notif.id }
-        updateBadge()
-    }
-
-    @objc func clearAll() {
-        history.removeAll()
-        updateBadge()
-    }
-
-    @objc func quit() {
-        NSApplication.shared.terminate(nil)
-    }
-
-    func listenForCommands() {
-        DistributedNotificationCenter.default().addObserver(
-            self,
-            selector: #selector(handleCommand(_:)),
-            name: Constants.IPC.notificationName,
-            object: nil
+        menuBar = MenuBarController(
+            history: history,
+            onItemClick: { [weak self] notif in self?.handleClick(notif) },
+            onClearAll: { [weak self] in self?.history.clear() },
+            onQuit: { NSApplication.shared.terminate(nil) }
         )
+
+        history.onChange = { [weak self] in
+            DispatchQueue.main.async { self?.menuBar.refresh() }
+        }
+
+        dispatcher = NotificationDispatcher(
+            history: history,
+            soundPlayer: soundPlayer,
+            onClick: { [weak self] notif in self?.handleClick(notif) },
+            onClickFallback: { url, bundleId in
+                AppActivator.activate(url: url, bundleId: bundleId)
+            }
+        )
+
+        ipcListener = IPCListener(onMessage: { [weak self] ipc in
+            self?.dispatch(ipc)
+        })
     }
 
-    @objc func handleCommand(_ notification: Notification) {
-        guard let payload = notification.userInfo?[Constants.IPC.payloadKey] as? Data,
-              let ipc = try? JSONDecoder().decode(IPCMessage.self, from: payload) else { return }
+    func send(args: NotificationArgs) {
+        dispatcher.send(args)
+    }
 
+    private func dispatch(_ ipc: IPCMessage) {
         let args = NotificationArgs(
             title: ipc.title,
             message: ipc.message,
@@ -104,104 +52,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             activate: ipc.activate,
             url: ipc.url
         )
-        sendNotification(args: args)
+        dispatcher.send(args)
     }
 
-    func setupNotificationCenter() {
-        let center = UNUserNotificationCenter.current()
-        center.delegate = self
-
-        center.requestAuthorization(options: Constants.Auth.requestedOptions) { granted, error in
-            if let error = error {
-                print("Notification auth error: \(error)")
-            }
-        }
-    }
-
-    func sendNotification(args: NotificationArgs) {
-        let content = UNMutableNotificationContent()
-        content.title = args.title
-        content.body = args.message
-        content.sound = args.sound ? .default : nil
-        content.userInfo = [
-            Constants.UNUserInfo.bundleIdKey: args.activate ?? "",
-            Constants.UNUserInfo.urlKey: args.url ?? ""
-        ]
-
-        let id = UUID().uuidString
-        let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
-
-        history.insert(
-            StoredNotification(
-                id: id,
-                title: args.title,
-                message: args.message,
-                bundleId: args.activate,
-                url: args.url
-            ),
-            at: 0
-        )
-        DispatchQueue.main.async { self.updateBadge() }
-
-        UNUserNotificationCenter.current().add(request) { error in
-            if let error = error {
-                print("Notification error: \(error)")
-            }
-        }
-
-        // Play sound directly (UNNotificationSound.default doesn't always work)
-        if args.sound {
-            let task = Process()
-            task.executableURL = URL(fileURLWithPath: Constants.Sound.binaryPath)
-            task.arguments = [Constants.Sound.defaultFile]
-            try? task.run()
-        }
-    }
-
-    func activate(url: String?, bundleId: String?) {
-        if let url = url, !url.isEmpty {
-            openURL(url)
-        } else if let bundleId = bundleId, !bundleId.isEmpty {
-            openApp(bundleId: bundleId)
-        }
-    }
-
-    func openURL(_ urlString: String) {
-        guard let url = URL(string: urlString) else { return }
-        NSWorkspace.shared.open(url)
-    }
-
-    func openApp(bundleId: String) {
-        if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
-            NSWorkspace.shared.openApplication(at: appURL, configuration: NSWorkspace.OpenConfiguration())
-        }
-    }
-
-    // Show notification even when app is in foreground
-    func userNotificationCenter(_ center: UNUserNotificationCenter,
-                                willPresent notification: UNNotification,
-                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        completionHandler([.banner, .sound])
-    }
-
-    // Handle notification click
-    func userNotificationCenter(_ center: UNUserNotificationCenter,
-                                didReceive response: UNNotificationResponse,
-                                withCompletionHandler completionHandler: @escaping () -> Void) {
-        let notifId = response.notification.request.identifier
-        let userInfo = response.notification.request.content.userInfo
-
-        if let index = history.firstIndex(where: { $0.id == notifId }) {
-            let notif = history.remove(at: index)
-            activate(url: notif.url, bundleId: notif.bundleId)
-            DispatchQueue.main.async { self.updateBadge() }
-        } else {
-            let url = userInfo[Constants.UNUserInfo.urlKey] as? String
-            let bundleId = userInfo[Constants.UNUserInfo.bundleIdKey] as? String
-            activate(url: url, bundleId: bundleId)
-        }
-
-        completionHandler()
+    private func handleClick(_ notif: StoredNotification) {
+        AppActivator.activate(url: notif.url, bundleId: notif.bundleId)
+        history.remove(id: notif.id)
     }
 }
 
@@ -283,7 +139,6 @@ while let arg = args.first {
 }
 
 if daemonMode || !notifArgs.message.isEmpty {
-    // Try to acquire lock (single instance)
     let canStartDaemon = singleInstance.tryLock()
 
     if !canStartDaemon {
@@ -294,7 +149,6 @@ if daemonMode || !notifArgs.message.isEmpty {
         exit(0)
     }
 
-    // Start as menu bar app
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
     let delegate = AppDelegate()
@@ -303,7 +157,7 @@ if daemonMode || !notifArgs.message.isEmpty {
     if !daemonMode && !notifArgs.message.isEmpty {
         // Send notification after app starts
         DispatchQueue.main.asyncAfter(deadline: .now() + Constants.Startup.firstNotificationDelay) {
-            delegate.sendNotification(args: notifArgs)
+            delegate.send(args: notifArgs)
         }
     }
 
