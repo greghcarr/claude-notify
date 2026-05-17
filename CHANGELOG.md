@@ -1,0 +1,24 @@
+# Changelog
+
+All notable changes to this fork.
+
+## 1.1.0
+
+### Added
+- `-u, --url <url>` flag: open a URL on notification click. Supports `vscode://file/<path>`, `cursor://file/<path>`, web links, and any other URL scheme registered on the system. Overrides `-a` when both are provided. Targets a specific window for IDE workspaces (no more "just bring VS Code to front and hope it picks the right window").
+- `--version` flag: prints the current version and exits.
+- App icon: the Claude logomark on a warm cream rounded square, baked into the bundle's `.icns` so it shows on notification banners, in Notification Center, and in Finder.
+- Ships [examples/claude-code-notify.sh](examples/claude-code-notify.sh): a ready-made Claude Code hook script that auto-detects the host terminal (VS Code, Cursor, Ghostty, Terminal, iTerm2) and constructs a workspace-targeting URL when running inside an IDE.
+- GitHub Actions CI: `swift build`, `swift test`, `./build.sh`, and Info.plist validation on every push to `main`/`dev` and on PRs.
+
+### Changed
+- Default no-argument launch (`open /Applications/ClaudeNotify.app`, Finder double-click, LaunchAgent without `ProgramArguments`) now starts the menu bar daemon instead of exiting silently with an error.
+- Info.plist is now a versioned file at [Resources/Info.plist](Resources/Info.plist) instead of being heredoc-emitted by `build.sh`. Future plist changes are reviewable plist diffs.
+- IPC payload between the CLI client and the daemon is a single Codable struct serialized to JSON, replacing the previous stringly-typed `[String: Any]` dictionary. Adding a field is a one-line schema change.
+
+### Internal
+- `AppDelegate` decomposed into focused types: `NotificationHistory`, `MenuBarController`, `IPCListener`, `NotificationDispatcher`, `SoundPlayer` (protocol + `AfplaySoundPlayer` default impl), and `AppActivator`. `main.swift` drops from a 380-line god class to a ~50-line wiring delegate plus a CLI parser.
+- CLI parser extracted to a pure function returning a `CLIResult` enum; covered by 19 unit tests.
+- Test target with XCTest covering `NotificationHistory`, `IPCMessage` round-tripping (including unicode and decode-failure paths), and the CLI parser (34 tests total).
+- Magic values consolidated into a single `Constants` namespace.
+- `DEVELOPMENT.md` documents branching, commit cadence, versioning, and how-to recipes for adding flags or notification features.
