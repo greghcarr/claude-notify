@@ -310,6 +310,9 @@ while let arg = args.first {
     case "-a", "--activate":
         notifArgs.activate = args.first
         args = args.dropFirst()
+    case "--version":
+        print("claude-notify \(AppVersion.current)")
+        exit(0)
     case "-h", "--help":
         print("""
         Usage:
@@ -322,6 +325,7 @@ while let arg = args.first {
           -m, --message <text> Notification message
           -a, --activate <id>  Bundle ID to activate on click
           --no-sound           Disable sound
+          --version            Print version and exit
         """)
         exit(0)
     default:
