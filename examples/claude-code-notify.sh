@@ -58,22 +58,35 @@ else:
 ')
 fi
 
+# Prefer CLAUDE_PROJECT_DIR (set by Claude Code's hook subprocess) over
+# PWD, since PWD inside a hook isn't always the workspace root.
+WORKSPACE="${CLAUDE_PROJECT_DIR:-$PWD}"
+
 # vscode:// and cursor:// expect file:// style absolute paths. Encode the
 # space character so paths like /Users/me/Visual Studio Code/repo work.
-ENCODED_PWD="${PWD// /%20}"
+ENCODED_WORKSPACE="${WORKSPACE// /%20}"
 
-if [[ -n "${CURSOR_TRACE_ID:-}" ]]; then
-    "$CLI_PATH" -m "$MESSAGE" -u "cursor://file/${ENCODED_PWD}" &
-elif [[ "${TERM_PROGRAM:-}" == "vscode" ]]; then
-    "$CLI_PATH" -m "$MESSAGE" -u "vscode://file/${ENCODED_PWD}" &
+# Use the workspace folder name as the notification title so users with
+# multiple Claude Code sessions can tell at a glance which window is asking.
+TITLE="$(basename "$WORKSPACE")"
+
+# Detect the IDE/terminal. TERM_PROGRAM is set when invoked from an interactive
+# terminal but is empty in a Claude Code hook subprocess; VSCODE_PID /
+# VSCODE_IPC_HOOK / CURSOR_TRACE_ID propagate through that boundary. Check
+# Cursor before VS Code because Cursor is a VS Code fork that also sets
+# VSCODE_PID.
+if [[ -n "${CURSOR_TRACE_ID:-}" ]] || [[ "${VSCODE_IPC_HOOK:-}" == *"/Cursor/"* ]]; then
+    "$CLI_PATH" -m "$MESSAGE" -t "$TITLE" -u "cursor://file/${ENCODED_WORKSPACE}" &
+elif [[ "${TERM_PROGRAM:-}" == "vscode" ]] || [[ -n "${VSCODE_PID:-}" ]]; then
+    "$CLI_PATH" -m "$MESSAGE" -t "$TITLE" -u "vscode://file/${ENCODED_WORKSPACE}" &
 elif [[ "${TERM_PROGRAM:-}" == "ghostty" ]]; then
-    "$CLI_PATH" -m "$MESSAGE" -a com.mitchellh.ghostty &
+    "$CLI_PATH" -m "$MESSAGE" -t "$TITLE" -a com.mitchellh.ghostty &
 elif [[ "${TERM_PROGRAM:-}" == "Apple_Terminal" ]]; then
-    "$CLI_PATH" -m "$MESSAGE" -a com.apple.Terminal &
+    "$CLI_PATH" -m "$MESSAGE" -t "$TITLE" -a com.apple.Terminal &
 elif [[ "${TERM_PROGRAM:-}" == "iTerm.app" ]]; then
-    "$CLI_PATH" -m "$MESSAGE" -a com.googlecode.iterm2 &
+    "$CLI_PATH" -m "$MESSAGE" -t "$TITLE" -a com.googlecode.iterm2 &
 elif [[ -n "${__CFBundleIdentifier:-}" ]]; then
-    "$CLI_PATH" -m "$MESSAGE" -a "$__CFBundleIdentifier" &
+    "$CLI_PATH" -m "$MESSAGE" -t "$TITLE" -a "$__CFBundleIdentifier" &
 else
-    "$CLI_PATH" -m "$MESSAGE" &
+    "$CLI_PATH" -m "$MESSAGE" -t "$TITLE" &
 fi
