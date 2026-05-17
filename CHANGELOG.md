@@ -2,6 +2,11 @@
 
 All notable changes to this fork.
 
+## 1.1.1
+
+### Changed
+- Hook script reads Claude Code's JSON event payload on stdin and uses the actual `message` field as the notification body. Previously it always said "Claude finished" regardless of event. Falls back to event-appropriate defaults when the payload is missing or has no message. Manual invocation with a positional arg (e.g. `notify.sh "Test"`) still uses the arg and skips stdin parsing.
+
 ## 1.1.0
 
 ### Added
