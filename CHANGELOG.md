@@ -2,6 +2,11 @@
 
 All notable changes to this fork.
 
+## 1.1.4
+
+### Fixed
+- `claude-notify --daemon -m "<message>"` no longer silently swallows the message when launching the daemon from a cold start. Previously the launcher only delivered the initial message if `--daemon` was *not* passed; now it delivers whenever `-m` is set, regardless of the daemon flag. Useful for self-announcing daemon startups from a LaunchAgent or script.
+
 ## 1.1.3
 
 ### Added
