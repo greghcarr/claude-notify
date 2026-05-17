@@ -294,6 +294,14 @@ var notifArgs = NotificationArgs()
 var daemonMode = false
 
 var args = CommandLine.arguments.dropFirst()
+
+// Bundled launches (Finder double-click, `open .app`, LaunchAgent without
+// ProgramArguments) pass zero args. Treat that as `--daemon` so the menu
+// bar app starts instead of exiting with the no-args error.
+if args.isEmpty {
+    daemonMode = true
+}
+
 while let arg = args.first {
     args = args.dropFirst()
     switch arg {
