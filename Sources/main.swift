@@ -1,111 +1,6 @@
 import Cocoa
 import UserNotifications
 
-enum Constants {
-    enum IPC {
-        static let notificationName = Notification.Name("com.claude.notify.send")
-        static let lockFilePath = "/tmp/claude-notify.lock"
-        static let payloadKey = "payload"
-    }
-
-    enum UNUserInfo {
-        static let bundleIdKey = "bundleId"
-        static let urlKey = "url"
-    }
-
-    enum Defaults {
-        static let title = "Claude Code"
-    }
-
-    enum Icons {
-        static let pending = "bubble.left.fill"
-        static let idle = "bubble.left"
-        static let accessibilityDescription = "Claude Notify"
-    }
-
-    enum Menu {
-        static let maxVisibleHistory = 5
-        static let messagePreviewLength = 40
-        static let ellipsis = "..."
-        static let emptyLabel = "No notifications"
-        static let clearAllTitle = "Clear all"
-        static let quitTitle = "Quit"
-        static let countSuffix = "notification(s)"
-    }
-
-    enum Shortcuts {
-        static let clearAll = "c"
-        static let quit = "q"
-    }
-
-    enum Sound {
-        static let binaryPath = "/usr/bin/afplay"
-        static let defaultFile = "/System/Library/Sounds/Glass.aiff"
-    }
-
-    enum Startup {
-        static let firstNotificationDelay: TimeInterval = 0.5
-    }
-
-    enum Auth {
-        static let requestedOptions: UNAuthorizationOptions = [.alert, .sound, .badge]
-    }
-}
-
-struct IPCMessage: Codable {
-    let title: String
-    let message: String
-    let sound: Bool
-    let activate: String?
-    let url: String?
-}
-
-// Single instance lock using file lock
-class SingleInstance {
-    private var fileDescriptor: Int32 = -1
-
-    func tryLock() -> Bool {
-        fileDescriptor = open(Constants.IPC.lockFilePath, O_CREAT | O_RDWR, 0o644)
-        if fileDescriptor == -1 { return false }
-
-        var lock = flock()
-        lock.l_start = 0
-        lock.l_len = 0
-        lock.l_type = Int16(F_WRLCK)
-        lock.l_whence = Int16(SEEK_SET)
-
-        if fcntl(fileDescriptor, F_SETLK, &lock) == -1 {
-            close(fileDescriptor)
-            fileDescriptor = -1
-            return false
-        }
-
-        // Write PID to file
-        ftruncate(fileDescriptor, 0)
-        let pid = "\(getpid())"
-        write(fileDescriptor, pid, pid.count)
-
-        return true
-    }
-
-    deinit {
-        if fileDescriptor != -1 {
-            close(fileDescriptor)
-            unlink(Constants.IPC.lockFilePath)
-        }
-    }
-}
-
-let singleInstance = SingleInstance()
-
-struct StoredNotification {
-    let id: String
-    let title: String
-    let message: String
-    let bundleId: String?
-    let url: String?
-}
-
 class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     var statusItem: NSStatusItem!
     var history: [StoredNotification] = []
@@ -308,14 +203,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
 
         completionHandler()
     }
-}
-
-struct NotificationArgs {
-    var title = Constants.Defaults.title
-    var message = ""
-    var sound = true
-    var activate: String?
-    var url: String?
 }
 
 // Send command to running daemon via DistributedNotificationCenter
