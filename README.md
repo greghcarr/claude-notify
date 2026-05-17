@@ -16,7 +16,21 @@ A lightweight macOS menu bar app for sending native notifications from the comma
 
 ## Installation
 
+### Homebrew (recommended)
+
+```bash
+brew install --cask greghcarr/tap/claude-notify
+```
+
+That downloads the prebuilt `.app` from the latest release and installs it to `/Applications`. macOS will block the first launch with a "developer cannot be verified" warning because the binary is ad-hoc signed; see [Troubleshooting](#troubleshooting).
+
+### Download the prebuilt .app
+
+Grab `ClaudeNotify-1.1.3.zip` from the [latest release](https://github.com/greghcarr/claude-notify/releases/latest) and drop `ClaudeNotify.app` into `/Applications/`.
+
 ### Build from source
+
+Needs Xcode command-line tools (Swift 5.9+).
 
 ```bash
 ./build.sh
@@ -174,6 +188,36 @@ launchctl list | grep claude
 Find any app's bundle ID:
 ```bash
 osascript -e 'id of app "AppName"'
+```
+
+## Troubleshooting
+
+### Banner shows "Claude Notify" / "Notification" instead of the real content
+
+macOS's notification privacy setting is hiding the content. Open **System Settings → Notifications → ClaudeNotify**, find **Show Previews**, and set it to **Always**. The default "When Unlocked" replaces the title and body with the bundle name + the literal word "Notification" in some Focus and lock states.
+
+### First launch is blocked: "ClaudeNotify cannot be opened because the developer cannot be verified"
+
+The `.app` is signed ad-hoc, not notarized. Right-click the `.app` in Finder and choose **Open** (instead of double-clicking) the first time; macOS gives you an Open button in the dialog. After that first allow, it launches normally.
+
+### No notifications appear at all
+
+Open **System Settings → Notifications → ClaudeNotify** and confirm **Allow Notifications** is on. If ClaudeNotify isn't in the list at all, the app hasn't been registered yet — launch it once via `open /Applications/ClaudeNotify.app` (or by sending a notification) and accept the permission prompt.
+
+### Clicking a notification doesn't focus the right VS Code window
+
+The hook script needs the env vars Claude Code sets in its hook subprocess (`VSCODE_PID` or `CLAUDE_PROJECT_DIR`). If you wrote a custom hook and click-to-activate isn't routing correctly, use the bundled [examples/claude-code-notify.sh](examples/claude-code-notify.sh) which has the detection wired up.
+
+### Two daemons running / changes don't take effect after rebuild
+
+The LaunchAgent's `KeepAlive: true` setting respawns the daemon as soon as you `killall ClaudeNotify`, and the respawn loads whichever binary was on disk at that moment. To install a new build, unload the agent first:
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.claude.notify.plist
+killall ClaudeNotify 2>/dev/null
+cp -r .build/release/ClaudeNotify.app /Applications/
+codesign --force --deep --sign - /Applications/ClaudeNotify.app
+launchctl load ~/Library/LaunchAgents/com.claude.notify.plist
 ```
 
 ## License
