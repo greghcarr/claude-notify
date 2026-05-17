@@ -2,6 +2,13 @@
 
 All notable changes to this fork.
 
+## 1.1.2
+
+### Changed
+- Hook script (`examples/claude-code-notify.sh`) sets the notification title to the workspace folder name so users with multiple Claude Code sessions can identify the source at a glance.
+- Hook script detects VS Code and Cursor via `VSCODE_PID` and `VSCODE_IPC_HOOK` in addition to `TERM_PROGRAM` and `CURSOR_TRACE_ID`. Claude Code's hook subprocess does not inherit `TERM_PROGRAM`; previously this caused hook-fired notifications to fall through to the bare-fallback branch with no `-u` URL, so click-to-activate did nothing.
+- Hook script prefers `CLAUDE_PROJECT_DIR` over `$PWD` for both title and URL path, since `$PWD` inside a hook is not always the workspace root.
+
 ## 1.1.1
 
 ### Changed
