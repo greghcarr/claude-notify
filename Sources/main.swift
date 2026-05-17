@@ -84,9 +84,16 @@ class SingleInstance {
 
 let singleInstance = SingleInstance()
 
+struct StoredNotification {
+    let id: String
+    let title: String
+    let message: String
+    let bundleId: String?
+}
+
 class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     var statusItem: NSStatusItem!
-    var history: [(id: String, message: String, title: String, bundleId: String?)] = []
+    var history: [StoredNotification] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Prevent macOS from auto-terminating the app
@@ -150,7 +157,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     }
 
     @objc func openFromMenu(_ sender: NSMenuItem) {
-        guard let notif = sender.representedObject as? (id: String, message: String, title: String, bundleId: String?) else { return }
+        guard let notif = sender.representedObject as? StoredNotification else { return }
 
         if let bundleId = notif.bundleId, !bundleId.isEmpty {
             openApp(bundleId: bundleId)
@@ -211,7 +218,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         let id = UUID().uuidString
         let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
 
-        history.insert((id: id, message: args.message, title: args.title, bundleId: args.activate), at: 0)
+        history.insert(StoredNotification(id: id, title: args.title, message: args.message, bundleId: args.activate), at: 0)
         DispatchQueue.main.async { self.updateBadge() }
 
         UNUserNotificationCenter.current().add(request) { error in
