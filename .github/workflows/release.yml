@@ -1,0 +1,111 @@
+# Release pipeline.
+#
+# Triggers when a version tag (vX.Y.Z) is pushed. Builds the .app from the
+# tagged source, attaches it to a GitHub Release (creating one if needed),
+# and updates the Cask version + sha256 in both this repo (on dev) and
+# greghcarr/homebrew-tap (on main).
+#
+# Required for the tap-update step:
+#   Repository secret TAP_PAT, a fine-grained personal access token scoped
+#   to greghcarr/homebrew-tap with "Contents: Read and write" permission.
+#   Without it, that step skips with a warning; the release itself still
+#   publishes.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: version
+        run: echo "v=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build .app and zip
+        run: |
+          ./build.sh
+          cd .build/release
+          ZIP="ClaudeNotify-${{ steps.version.outputs.v }}.zip"
+          zip -qry "$ZIP" ClaudeNotify.app
+          echo "ZIP_PATH=$(pwd)/$ZIP" >> "$GITHUB_ENV"
+          echo "SHA=$(shasum -a 256 $ZIP | cut -d ' ' -f 1)" >> "$GITHUB_ENV"
+
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        run: |
+          VER="${{ steps.version.outputs.v }}"
+          NOTES=$(awk -v ver="$VER" '
+            $0 == "## " ver { found=1; next }
+            found && /^## [0-9]/ { exit }
+            found { print }
+          ' CHANGELOG.md)
+          {
+            echo "body<<RELEASE_NOTES_EOF"
+            echo "$NOTES"
+            echo "RELEASE_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$ZIP_PATH" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --notes "${{ steps.notes.outputs.body }}" \
+              "$ZIP_PATH"
+          fi
+
+      - name: Update Cask in source repo (on dev)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin dev
+          git checkout dev
+          sed -i '' "s|^  version \".*\"|  version \"${{ steps.version.outputs.v }}\"|" Casks/claude-notify.rb
+          sed -i '' "s|^  sha256 \".*\"|  sha256 \"$SHA\"|" Casks/claude-notify.rb
+          if ! git diff --quiet Casks/claude-notify.rb; then
+            git add Casks/claude-notify.rb
+            git commit -m "Update Cask for $GITHUB_REF_NAME"
+            git push origin dev
+          fi
+
+      - name: Update Cask in greghcarr/homebrew-tap
+        env:
+          TAP_PAT: ${{ secrets.TAP_PAT }}
+        run: |
+          if [ -z "${TAP_PAT}" ]; then
+            echo "TAP_PAT secret not set; skipping tap update."
+            echo "To enable automatic tap updates, create a fine-grained PAT scoped"
+            echo "to greghcarr/homebrew-tap with 'Contents: Read and write' permission"
+            echo "and add it as a repository secret named TAP_PAT."
+            exit 0
+          fi
+          git clone "https://x-access-token:${TAP_PAT}@github.com/greghcarr/homebrew-tap.git" /tmp/tap
+          cd /tmp/tap
+          sed -i '' "s|^  version \".*\"|  version \"${{ steps.version.outputs.v }}\"|" Casks/claude-notify.rb
+          sed -i '' "s|^  sha256 \".*\"|  sha256 \"$SHA\"|" Casks/claude-notify.rb
+          if ! git diff --quiet Casks/claude-notify.rb; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add Casks/claude-notify.rb
+            git commit -m "Update claude-notify to $GITHUB_REF_NAME"
+            git push origin main
+          fi

@@ -2,6 +2,7 @@
 
 A lightweight macOS menu bar app for sending native notifications from the command line. Built for [Claude Code](https://claude.ai/code) hooks but works with any CLI workflow.
 
+[![CI](https://github.com/greghcarr/claude-notify/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/greghcarr/claude-notify/actions/workflows/ci.yml)
 ![macOS](https://img.shields.io/badge/macOS-13%2B-blue)
 ![Swift](https://img.shields.io/badge/Swift-5.9-orange)
 
