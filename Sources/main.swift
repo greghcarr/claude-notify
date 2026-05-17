@@ -80,65 +80,16 @@ func sendToDaemon(args: NotificationArgs) {
     )
 }
 
-// Parse arguments
-var notifArgs = NotificationArgs()
-var daemonMode = false
+switch CLIParser.parse(Array(CommandLine.arguments.dropFirst())) {
+case .printAndExit(let output):
+    print(output)
+    exit(0)
 
-var args = CommandLine.arguments.dropFirst()
+case .error(let message):
+    print(message)
+    exit(1)
 
-// Bundled launches (Finder double-click, `open .app`, LaunchAgent without
-// ProgramArguments) pass zero args. Treat that as `--daemon` so the menu
-// bar app starts instead of exiting with the no-args error.
-if args.isEmpty {
-    daemonMode = true
-}
-
-while let arg = args.first {
-    args = args.dropFirst()
-    switch arg {
-    case "-d", "--daemon":
-        daemonMode = true
-    case "-t", "--title":
-        notifArgs.title = args.first ?? notifArgs.title
-        args = args.dropFirst()
-    case "-m", "--message":
-        notifArgs.message = args.first ?? ""
-        args = args.dropFirst()
-    case "--no-sound":
-        notifArgs.sound = false
-    case "-a", "--activate":
-        notifArgs.activate = args.first
-        args = args.dropFirst()
-    case "-u", "--url":
-        notifArgs.url = args.first
-        args = args.dropFirst()
-    case "--version":
-        print("claude-notify \(AppVersion.current)")
-        exit(0)
-    case "-h", "--help":
-        print("""
-        Usage:
-          claude-notify --daemon              Start menu bar daemon
-          claude-notify -m <msg> [-a <app>]   Send notification
-
-        Options:
-          -d, --daemon         Run as menu bar daemon
-          -t, --title <text>   Notification title (default: "\(Constants.Defaults.title)")
-          -m, --message <text> Notification message
-          -a, --activate <id>  Bundle ID to activate on click
-          -u, --url <url>      URL to open on click (overrides -a)
-          --no-sound           Disable sound
-          --version            Print version and exit
-        """)
-        exit(0)
-    default:
-        if notifArgs.message.isEmpty {
-            notifArgs.message = arg
-        }
-    }
-}
-
-if daemonMode || !notifArgs.message.isEmpty {
+case .run(let notifArgs, let daemonMode):
     let canStartDaemon = singleInstance.tryLock()
 
     if !canStartDaemon {
@@ -162,7 +113,4 @@ if daemonMode || !notifArgs.message.isEmpty {
     }
 
     app.run()
-} else {
-    print("Error: use --daemon or provide -m <message>")
-    exit(1)
 }
