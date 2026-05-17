@@ -111,6 +111,8 @@ A ready-made hook script lives at [examples/claude-code-notify.sh](examples/clau
 - **Ghostty, Terminal, iTerm2**: activates the app by bundle ID.
 - **Anything else**: falls back to the `__CFBundleIdentifier` environment variable, then to no click target if that is also missing.
 
+The notification body comes from Claude Code's hook payload: for `Notification` events it surfaces the actual prompt (e.g. "Claude needs your permission to use Bash"), for `Stop` events it shows "Claude finished".
+
 Install:
 
 ```bash

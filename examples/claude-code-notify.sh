@@ -4,6 +4,13 @@
 # terminal Claude Code is running inside, with IDE workspaces preferred over
 # bare app activation when the URL scheme is available.
 #
+# When invoked by Claude Code, parses the JSON event payload on stdin and
+# uses its "message" field as the notification body. Falls back to
+# event-appropriate defaults if the payload is missing or has no message.
+#
+# When invoked manually with `notify.sh "Some message"`, uses the positional
+# argument as the message body (useful for testing).
+#
 # Install:
 #   mkdir -p ~/.claude/hooks
 #   cp examples/claude-code-notify.sh ~/.claude/hooks/notify.sh
@@ -15,6 +22,9 @@
 #     "hooks": {
 #       "Notification": [
 #         { "hooks": [ { "type": "command", "command": "~/.claude/hooks/notify.sh" } ] }
+#       ],
+#       "Stop": [
+#         { "hooks": [ { "type": "command", "command": "~/.claude/hooks/notify.sh" } ] }
 #       ]
 #     }
 #   }
@@ -24,7 +34,29 @@
 set -u
 
 CLI_PATH="/Applications/ClaudeNotify.app/Contents/MacOS/ClaudeNotify"
-MESSAGE="${1:-Claude finished}"
+
+if [ -n "${1:-}" ]; then
+    MESSAGE="$1"
+else
+    MESSAGE=$(/usr/bin/python3 -c '
+import sys, json
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    print("Claude Code event")
+    sys.exit()
+event = data.get("hook_event_name", "")
+msg = data.get("message", "")
+if msg:
+    print(msg)
+elif event == "Stop":
+    print("Claude finished")
+elif event == "Notification":
+    print("Claude needs your input")
+else:
+    print(event or "Claude Code event")
+')
+fi
 
 # vscode:// and cursor:// expect file:// style absolute paths. Encode the
 # space character so paths like /Users/me/Visual Studio Code/repo work.
