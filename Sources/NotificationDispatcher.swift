@@ -4,15 +4,18 @@ import UserNotifications
 final class NotificationDispatcher: NSObject, UNUserNotificationCenterDelegate {
     private let history: NotificationHistory
     private let soundPlayer: SoundPlayer
+    private let soundPreference: SoundPreference
     private let onClick: (StoredNotification) -> Void
     private let onClickFallback: (_ url: String?, _ bundleId: String?) -> Void
 
     init(history: NotificationHistory,
          soundPlayer: SoundPlayer,
+         soundPreference: SoundPreference,
          onClick: @escaping (StoredNotification) -> Void,
          onClickFallback: @escaping (_ url: String?, _ bundleId: String?) -> Void) {
         self.history = history
         self.soundPlayer = soundPlayer
+        self.soundPreference = soundPreference
         self.onClick = onClick
         self.onClickFallback = onClickFallback
         super.init()
@@ -27,10 +30,11 @@ final class NotificationDispatcher: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func send(_ args: NotificationArgs) {
+        let soundEnabled = args.sound && soundPreference.isEnabled
         let content = UNMutableNotificationContent()
         content.title = args.title
         content.body = args.message
-        content.sound = args.sound ? .default : nil
+        content.sound = soundEnabled ? .default : nil
         content.userInfo = [
             Constants.UNUserInfo.bundleIdKey: args.activate ?? "",
             Constants.UNUserInfo.urlKey: args.url ?? ""
@@ -53,7 +57,7 @@ final class NotificationDispatcher: NSObject, UNUserNotificationCenterDelegate {
             }
         }
 
-        if args.sound { soundPlayer.play() }
+        if soundEnabled { soundPlayer.play() }
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter,

@@ -3,17 +3,23 @@ import AppKit
 final class MenuBarController: NSObject {
     private var statusItem: NSStatusItem!
     private let history: NotificationHistory
+    private let soundPreference: SoundPreference
     private let onItemClick: (StoredNotification) -> Void
     private let onClearAll: () -> Void
+    private let onToggleSound: () -> Void
     private let onQuit: () -> Void
 
     init(history: NotificationHistory,
+         soundPreference: SoundPreference,
          onItemClick: @escaping (StoredNotification) -> Void,
          onClearAll: @escaping () -> Void,
+         onToggleSound: @escaping () -> Void,
          onQuit: @escaping () -> Void) {
         self.history = history
+        self.soundPreference = soundPreference
         self.onItemClick = onItemClick
         self.onClearAll = onClearAll
+        self.onToggleSound = onToggleSound
         self.onQuit = onQuit
         super.init()
 
@@ -59,6 +65,12 @@ final class MenuBarController: NSObject {
         }
 
         menu.addItem(NSMenuItem.separator())
+
+        let soundItem = NSMenuItem(title: Constants.Menu.soundToggleTitle, action: #selector(toggleSoundClicked), keyEquivalent: Constants.Shortcuts.toggleSound)
+        soundItem.target = self
+        soundItem.state = soundPreference.isEnabled ? .on : .off
+        menu.addItem(soundItem)
+
         let quitItem = NSMenuItem(title: Constants.Menu.quitTitle, action: #selector(quitClicked), keyEquivalent: Constants.Shortcuts.quit)
         quitItem.target = self
         menu.addItem(quitItem)
@@ -73,6 +85,10 @@ final class MenuBarController: NSObject {
 
     @objc private func clearAllClicked() {
         onClearAll()
+    }
+
+    @objc private func toggleSoundClicked() {
+        onToggleSound()
     }
 
     @objc private func quitClicked() {

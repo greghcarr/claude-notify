@@ -3,6 +3,7 @@ import UserNotifications
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let history = NotificationHistory()
+    private let soundPreference = SoundPreference()
     private let soundPlayer: SoundPlayer = AfplaySoundPlayer(
         binaryPath: Constants.Sound.binaryPath,
         soundFile: Constants.Sound.defaultFile
@@ -17,8 +18,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menuBar = MenuBarController(
             history: history,
+            soundPreference: soundPreference,
             onItemClick: { [weak self] notif in self?.handleClick(notif) },
             onClearAll: { [weak self] in self?.history.clear() },
+            onToggleSound: { [weak self] in self?.soundPreference.toggle() },
             onQuit: { NSApplication.shared.terminate(nil) }
         )
 
@@ -26,9 +29,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async { self?.menuBar.refresh() }
         }
 
+        soundPreference.onChange = { [weak self] in
+            DispatchQueue.main.async { self?.menuBar.refresh() }
+        }
+
         dispatcher = NotificationDispatcher(
             history: history,
             soundPlayer: soundPlayer,
+            soundPreference: soundPreference,
             onClick: { [weak self] notif in self?.handleClick(notif) },
             onClickFallback: { url, bundleId in
                 AppActivator.activate(url: url, bundleId: bundleId)

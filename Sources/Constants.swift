@@ -31,11 +31,17 @@ enum Constants {
         static let clearAllTitle = "Clear all"
         static let quitTitle = "Quit"
         static let countSuffix = "notification(s)"
+        static let soundToggleTitle = "Sound"
     }
 
     enum Shortcuts {
         static let clearAll = "c"
         static let quit = "q"
+        static let toggleSound = "s"
+    }
+
+    enum Preferences {
+        static let soundEnabledKey = "soundEnabled"
     }
 
     enum Sound {
